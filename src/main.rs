@@ -316,6 +316,7 @@ impl Modules {
   }
 
   fn fulfilled(&mut self, name: &str) {
+    println!("Fulfilled({})", name);
     assert!(self.get(name).error.is_none());
     match self.get(name).status {
       | Status::Instantiating
@@ -323,6 +324,7 @@ impl Modules {
         assert_eq!(self.get(name).async_, Sync::Sync);
         assert!(self.get(name).apm.as_ref().unwrap().is_empty());
         // XXX possible?
+        panic!()
       },
       | Status::EvaluatingAsync
       => {
@@ -331,6 +333,7 @@ impl Modules {
       | _ => (),
     }
     for m in self.get(name).apm.clone().unwrap() {
+      println!("  > parent module {:?}", self.get(&m));
       if self.get(name).dfs_index.unwrap() != self.get(name).dfs_anc_index.unwrap() {
         assert_eq!(self.get(&m).dfs_anc_index.unwrap(), self.get(name).dfs_anc_index.unwrap());
       }
@@ -360,6 +363,7 @@ impl Modules {
         assert_eq!(self.get(name).async_, Sync::Sync);
         assert!(self.get(name).apm.as_ref().unwrap().is_empty());
         // XXX possible?
+        panic!()
       },
       | Status::EvaluatingAsync
       => {
@@ -587,6 +591,9 @@ fn run(modules: &mut Modules, name: &str) {
 
   println!(">>> Evaluate");
   modules.evaluate(name);
+  for (k, v) in &modules.modules {
+    assert_ne!(v.status, Status::Evaluating, "{}", k);
+  }
   println!("=================");
 }
 
