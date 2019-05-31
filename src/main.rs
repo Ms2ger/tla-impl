@@ -84,6 +84,12 @@ impl Promise {
   }
 }
 
+impl std::fmt::Debug for Promise {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+    "Promise".fmt(f)
+  }
+}
+
 #[derive(PartialOrd, Ord, PartialEq, Eq, Debug, Copy, Clone)]
 enum Sync {
   Sync,
@@ -100,6 +106,7 @@ enum Status {
   Evaluated,
 }
 
+#[derive(Debug)]
 struct Module {
   name: String,
   broken: bool,
@@ -603,6 +610,46 @@ fn example2() {
   modules.insert("B".to_owned(), Sync::Async, vec!["A".to_owned()], false);
   modules.insert("C".to_owned(), Sync::Sync, vec![], false);
   run(&mut modules, "A");
+  for m in modules.modules.values() {
+    println!("{:?}", m);
+  }
+
+  assert_eq!(modules.execution_order, &[
+    "B".to_owned(),
+    "C".to_owned(),
+    "A".to_owned(),
+  ]);
+  for m in modules.modules.values() {
+    assert_eq!(m.status, if m.name == "C" {
+      Status::Evaluated
+    } else {
+      Status::EvaluatingAsync
+    });
+  }
+
+  modules.tick();
+  for m in modules.modules.values() {
+    assert_eq!(m.status, Status::Evaluated);
+  }
+}
+
+#[test]
+fn example2b() {
+  println!("Example 2");
+  let mut modules = Modules::new();
+  modules.insert("A".to_owned(), Sync::Async, vec!["B".to_owned()], false);
+  modules.insert("B".to_owned(), Sync::Async, vec!["A".to_owned(), "C".to_owned()], false);
+  modules.insert("C".to_owned(), Sync::Sync, vec![], false);
+  run(&mut modules, "A");
+  for m in modules.modules.values() {
+    println!("{:?}", m);
+  }
+
+  assert_eq!(modules.execution_order, &[
+    "C".to_owned(),
+    "B".to_owned(),
+    "A".to_owned(),
+  ]);
 }
 
 #[test]
@@ -675,9 +722,17 @@ fn example7() {
   modules.insert("B".to_owned(), Sync::Async, vec!["A".to_owned(), "C".to_owned()], false);
   modules.insert("C".to_owned(), Sync::Async, vec![], false);
   run(&mut modules, "A");
+
+  for m in modules.modules.values() {
+    println!("{:?}", m);
+  }
+
   assert_eq!(modules.execution_order, &[
     "C".to_owned(),
   ]);
+  for m in modules.modules.values() {
+    assert_eq!(m.status, Status::EvaluatingAsync);
+  }
 
   modules.tick();
   assert_eq!(modules.execution_order, &[
@@ -685,6 +740,23 @@ fn example7() {
     "B".to_owned(),
     "A".to_owned(),
   ]);
+  for m in modules.modules.values() {
+    assert_eq!(m.status, if m.name == "C" {
+      Status::Evaluated
+    } else {
+      Status::EvaluatingAsync
+    });
+  }
+
+  modules.tick();
+  assert_eq!(modules.execution_order, &[
+    "C".to_owned(),
+    "B".to_owned(),
+    "A".to_owned(),
+  ]);
+  for m in modules.modules.values() {
+    assert_eq!(m.status, Status::Evaluated);
+  }
 }
 
 #[test]
