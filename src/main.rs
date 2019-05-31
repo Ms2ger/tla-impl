@@ -43,21 +43,44 @@ impl<T> IntoIterator for LoudVec<T> {
   }
 }
 
-struct Promise(RefCell<Option<Result<(), String>>>);
+struct Promise {
+  data: RefCell<Option<Result<(), String>>>,
+  children: RefCell<Vec<(Box<FnOnce(&mut Modules)>, Box<FnOnce(&mut Modules, String)>)>>,
+}
 
 impl Promise {
-  fn new() -> Rc<Self> {
-    Rc::new(Self(RefCell::new(None)))
+  fn new(modules: &mut Modules) -> Rc<Self> {
+    let result = Rc::new(Self {
+      data: RefCell::new(None),
+      children: RefCell::new(Vec::new()),
+    });
+    modules.record(result.clone());
+    result
   }
   fn resolve(&self) {
-    let mut cell = self.0.borrow_mut();
+    let mut cell = self.data.borrow_mut();
     assert_eq!(*cell, None);
     *cell = Some(Ok(()));
   }
   fn reject(&self, error: String) {
-    let mut cell = self.0.borrow_mut();
+    let mut cell = self.data.borrow_mut();
     assert_eq!(*cell, None);
     *cell = Some(Err(error));
+  }
+  fn then(&self, resolve: Box<FnOnce(&mut Modules)>, reject: Box<FnOnce(&mut Modules, String)>) {
+    let mut children = self.children.borrow_mut();
+    children.push((resolve, reject));
+  }
+  fn tick(&self, modules: &mut Modules) {
+    if let Some(result) = &*self.data.borrow() {
+      println!("Tick: result={:?}, calling {} children", result, self.children.borrow().len());
+      for (resolve, reject) in self.children.borrow_mut().drain(..) {
+        match result {
+          Ok(()) => resolve(modules),
+          Err(e) => reject(modules, e.clone()),
+        }
+      }
+    }
   }
 }
 
@@ -151,6 +174,7 @@ impl Module {
 struct Modules {
   modules: HashMap<String, Module>,
   execution_order: Vec<String>,
+  promises: Vec<Rc<Promise>>,
 }
 
 impl Modules {
@@ -158,6 +182,17 @@ impl Modules {
     Modules {
       modules: HashMap::new(),
       execution_order: Vec::new(),
+      promises: Vec::new(),
+    }
+  }
+
+  fn record(&mut self, promise: Rc<Promise>) {
+    self.promises.push(promise);
+  }
+
+  fn tick(&mut self) {
+    for promise in self.promises.clone() {
+      promise.tick(self);
     }
   }
 
@@ -177,7 +212,7 @@ impl Modules {
     println!("Fetching cycle root of {}", module);
     let mut module = module.to_owned();
     while self.get(&module).dfs_index.unwrap() > self.get(&module).dfs_anc_index.unwrap() {
-      assert!(!self.get(&module).apm.as_ref().unwrap().is_empty());
+      assert!(!self.get(&module).apm.as_ref().unwrap().is_empty(), "APM for {} is empty", module);
       let next = self.get(&module).apm.as_ref().unwrap()[0].to_owned();
       assert_eq!(self.get(&next).dfs_anc_index, self.get(&module).dfs_anc_index);
       module = next;
@@ -352,17 +387,14 @@ impl Modules {
         Err(e) => self.rejected(name, &e),
       }
     } else {
-      let capability = Promise::new();
+      let capability = Promise::new(self);
+      let name1 = name.to_owned();
+      let name2 = name.to_owned();
+      capability.then(
+        Box::new(move |modules| modules.fulfilled(&name1)),
+        Box::new(move |modules, error| modules.rejected(&name2, &error)),
+      );
       self.get(name).execute_module_async(capability.clone());
-      let result = capability.0.borrow().as_ref().unwrap().clone();
-      match result {
-        Ok(_) => {
-          self.fulfilled(name);
-        },
-        Err(error) => {
-          self.rejected(name, &error);
-        },
-      }
     }
   }
 
@@ -499,7 +531,7 @@ impl Modules {
     let mut stack = LoudVec::new("Evaluate stack");
 
     // Step 6.
-    let promise = Promise::new();
+    let promise = Promise::new(self);
 
     // Step 7.
     self.get_mut(&name).promise = Some(promise.clone());
