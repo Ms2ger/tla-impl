@@ -636,6 +636,58 @@ fn example4() {
 }
 
 #[test]
+fn example5() {
+  let mut modules = Modules::new();
+  modules.insert("A".to_owned(), Sync::Async, vec!["B".to_owned(), "C".to_owned()], false);
+  modules.insert("B".to_owned(), Sync::Async, vec!["D".to_owned()], false);
+  modules.insert("C".to_owned(), Sync::Async, vec!["D".to_owned()], false);
+  modules.insert("D".to_owned(), Sync::Async, vec![], false);
+  run(&mut modules, "A");
+  for (k, v) in &modules.modules {
+    println!("Module {}: Status={:?} DFSIndex={:?} DFSAncestorIndex={:?} Async={:?}", k, v.status, v.dfs_index, v.dfs_anc_index, v.async_);
+  }
+  modules.tick();
+  modules.tick();
+  assert_eq!(modules.execution_order, &[
+    "D".to_owned(),
+    "B".to_owned(),
+    "C".to_owned(),
+    "A".to_owned(),
+  ]);
+}
+
+#[test]
+fn example6() {
+  let mut modules = Modules::new();
+  modules.insert("A".to_owned(), Sync::Async, vec!["B".to_owned()], false);
+  modules.insert("B".to_owned(), Sync::Async, vec!["A".to_owned()], false);
+  run(&mut modules, "A");
+  assert_eq!(modules.execution_order, &[
+    "B".to_owned(),
+    "A".to_owned(),
+  ]);
+}
+
+#[test]
+fn example7() {
+  let mut modules = Modules::new();
+  modules.insert("A".to_owned(), Sync::Async, vec!["B".to_owned()], false);
+  modules.insert("B".to_owned(), Sync::Async, vec!["A".to_owned(), "C".to_owned()], false);
+  modules.insert("C".to_owned(), Sync::Async, vec![], false);
+  run(&mut modules, "A");
+  assert_eq!(modules.execution_order, &[
+    "C".to_owned(),
+  ]);
+
+  modules.tick();
+  assert_eq!(modules.execution_order, &[
+    "C".to_owned(),
+    "B".to_owned(),
+    "A".to_owned(),
+  ]);
+}
+
+#[test]
 fn example_guy() {
   println!("Example Guy");
   let mut modules = Modules::new();
@@ -648,6 +700,7 @@ fn example_guy() {
   for (k, v) in &modules.modules {
     println!("Module {}: Status={:?} DFSIndex={:?} DFSAncestorIndex={:?} Async={:?}", k, v.status, v.dfs_index, v.dfs_anc_index, v.async_);
   }
+  modules.tick();
   assert_eq!(modules.execution_order, &[
     "D".to_owned(),
     "B".to_owned(),
