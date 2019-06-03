@@ -603,6 +603,7 @@ fn run(modules: &mut Modules, name: &str) {
   modules.evaluate(name);
   for (k, v) in &modules.modules {
     assert_ne!(v.status, Status::Evaluating, "{}", k);
+    println!("{:?}", v);
   }
   println!("=================");
 }
@@ -627,9 +628,6 @@ fn example2() {
   modules.insert("B".to_owned(), Sync::Async, vec!["A".to_owned()], false);
   modules.insert("C".to_owned(), Sync::Sync, vec![], false);
   run(&mut modules, "A");
-  for m in modules.modules.values() {
-    println!("{:?}", m);
-  }
 
   assert_eq!(modules.execution_order, &[
     "B".to_owned(),
@@ -676,9 +674,6 @@ fn example2b() {
   modules.insert("B".to_owned(), Sync::Async, vec!["A".to_owned(), "C".to_owned()], false);
   modules.insert("C".to_owned(), Sync::Sync, vec![], false);
   run(&mut modules, "A");
-  for m in modules.modules.values() {
-    println!("{:?}", m);
-  }
 
   assert_eq!(modules.execution_order, &[
     "C".to_owned(),
@@ -699,9 +694,6 @@ fn example3() {
   let mut modules = Modules::new();
   modules.insert("B".to_owned(), Sync::Sync, vec![], true);
   run(&mut modules, "B");
-  for (k, v) in &modules.modules {
-    println!("Module {}: status is {:?}", k, v.status);
-  }
 }
 
 #[test]
@@ -715,9 +707,6 @@ fn example4() {
   modules.insert("C".to_owned(), Sync::Sync, vec![], true);
 //  modules.insert("D".to_owned(), Sync::Sync, vec![], false);
   run(&mut modules, "B");
-  for (k, v) in &modules.modules {
-    println!("Module {}: status is {:?}", k, v.status);
-  }
   modules.evaluate("B");
 //  modules.evaluate("C");
 //  modules.evaluate("D");
@@ -731,9 +720,6 @@ fn example5() {
   modules.insert("C".to_owned(), Sync::Async, vec!["D".to_owned()], false);
   modules.insert("D".to_owned(), Sync::Async, vec![], false);
   run(&mut modules, "A");
-  for (k, v) in &modules.modules {
-    println!("Module {}: Status={:?} DFSIndex={:?} DFSAncestorIndex={:?} Async={:?}", k, v.status, v.dfs_index, v.dfs_anc_index, v.async_);
-  }
   modules.tick();
   modules.tick();
   assert_eq!(modules.execution_order, &[
@@ -768,10 +754,6 @@ fn example7() {
   modules.insert("B".to_owned(), Sync::Async, vec!["A".to_owned(), "C".to_owned()], false);
   modules.insert("C".to_owned(), Sync::Async, vec![], false);
   run(&mut modules, "A");
-
-  for m in modules.modules.values() {
-    println!("{:?}", m);
-  }
 
   assert_eq!(modules.execution_order, &[
     "C".to_owned(),
@@ -862,9 +844,6 @@ fn example_guy() {
   modules.insert("D".to_owned(), Sync::Async, vec!["A".to_owned()], false);
   modules.insert("E".to_owned(), Sync::Async, vec![], false);
   run(&mut modules, "A");
-  for m in modules.modules.values() {
-    println!("{:?}", m);
-  }
 
   assert_eq!(modules.execution_order, &[
     "D".to_owned(),
@@ -897,9 +876,6 @@ fn example_common_dep() {
   modules.insert("C".to_owned(), Sync::Async, vec!["D".to_owned()], false);
   modules.insert("D".to_owned(), Sync::Async, vec![], false);
   run(&mut modules, "A");
-  for m in modules.modules.values() {
-    println!("{:?}", m);
-  }
 
   assert_eq!(modules.execution_order, &[
     "D".to_owned(),
