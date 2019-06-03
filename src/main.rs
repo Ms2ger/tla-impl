@@ -590,7 +590,7 @@ impl Modules {
   }
 }
 
-fn run(modules: &mut Modules, name: &str) {
+fn run(modules: &mut Modules, name: &str) -> Rc<Promise> {
   println!(">>> Instantiate");
   modules.instantiate(name);
   for (k, v) in &mut modules.modules {
@@ -600,12 +600,13 @@ fn run(modules: &mut Modules, name: &str) {
   }
 
   println!(">>> Evaluate");
-  modules.evaluate(name);
+  let promise = modules.evaluate(name);
   for (k, v) in &modules.modules {
     assert_ne!(v.status, Status::Evaluating, "{}", k);
     println!("{:?}", v);
   }
   println!("=================");
+  promise
 }
 
 #[test]
@@ -926,6 +927,98 @@ fn example_common_dep() {
   for m in modules.modules.values() {
     assert_eq!(m.status, Status::Evaluated);
     assert!(m.error.is_none());
+  }
+}
+
+#[test]
+fn spec_example_1() {
+  let mut modules = Modules::new();
+  modules.insert("A".to_owned(), Sync::Sync, vec!["B".to_owned()], false);
+  modules.insert("B".to_owned(), Sync::Sync, vec!["C".to_owned()], false);
+  modules.insert("C".to_owned(), Sync::Sync, vec![], false);
+  let promise = run(&mut modules, "A");
+  assert!(promise.data.borrow().as_ref().unwrap().is_ok());
+  assert_eq!(modules.execution_order, &[
+    "C".to_owned(),
+    "B".to_owned(),
+    "A".to_owned(),
+  ]);
+  for m in modules.modules.values() {
+    assert_eq!(m.status, Status::Evaluated);
+    assert!(m.error.is_none());
+  }
+}
+
+#[test]
+fn spec_example_2() {
+  let mut modules = Modules::new();
+  modules.insert("A".to_owned(), Sync::Sync, vec!["B".to_owned()], false);
+  modules.insert("B".to_owned(), Sync::Sync, vec!["C".to_owned()], true);
+  modules.insert("C".to_owned(), Sync::Sync, vec![], false);
+  let promise = run(&mut modules, "A");
+  assert!(promise.data.borrow().as_ref().unwrap().is_err());
+  assert_eq!(modules.execution_order, &[
+    "C".to_owned(),
+    "B".to_owned(),
+  ]);
+  for m in modules.modules.values() {
+    assert_eq!(m.status, Status::Evaluated);
+    assert_eq!(m.error.is_none(), m.name == "C");
+  }
+}
+
+#[test]
+fn spec_example_3() {
+  let mut modules = Modules::new();
+  modules.insert("A".to_owned(), Sync::Sync, vec!["B".to_owned(), "C".to_owned()], false);
+  modules.insert("B".to_owned(), Sync::Sync, vec!["A".to_owned()], false);
+  modules.insert("C".to_owned(), Sync::Sync, vec![], false);
+  run(&mut modules, "A");
+
+  assert_eq!(modules.execution_order, &[
+    "B".to_owned(),
+    "C".to_owned(),
+    "A".to_owned(),
+  ]);
+  for m in modules.modules.values() {
+    assert_eq!(m.status, Status::Evaluated);
+    assert!(m.error.is_none());
+  }
+}
+
+#[test]
+fn spec_example_4() {
+  let mut modules = Modules::new();
+  modules.insert("A".to_owned(), Sync::Sync, vec!["B".to_owned(), "C".to_owned()], true);
+  modules.insert("B".to_owned(), Sync::Sync, vec!["A".to_owned()], false);
+  modules.insert("C".to_owned(), Sync::Sync, vec![], false);
+  run(&mut modules, "A");
+
+  assert_eq!(modules.execution_order, &[
+    "B".to_owned(),
+    "C".to_owned(),
+    "A".to_owned(),
+  ]);
+  for m in modules.modules.values() {
+    assert_eq!(m.status, Status::Evaluated);
+    assert_eq!(m.error.is_none(), m.name == "C");
+  }
+}
+
+#[test]
+fn spec_example_4_modified() {
+  let mut modules = Modules::new();
+  modules.insert("A".to_owned(), Sync::Sync, vec!["B".to_owned()], true);
+  modules.insert("B".to_owned(), Sync::Sync, vec!["A".to_owned()], false);
+  run(&mut modules, "A");
+
+  assert_eq!(modules.execution_order, &[
+    "B".to_owned(),
+    "A".to_owned(),
+  ]);
+  for m in modules.modules.values() {
+    assert_eq!(m.status, Status::Evaluated);
+    assert_eq!(m.error.is_none(), m.name == "C");
   }
 }
 
