@@ -319,12 +319,10 @@ impl Modules {
     println!("Fulfilled({})", name);
     assert!(self.get(name).error.is_none());
     match self.get(name).status {
-      | Status::Instantiating
+      | Status::Evaluating
       => {
         assert_eq!(self.get(name).async_, Sync::Sync);
         assert!(self.get(name).apm.as_ref().unwrap().is_empty());
-        // XXX possible?
-        panic!()
       },
       | Status::EvaluatingAsync
       => {
@@ -358,12 +356,10 @@ impl Modules {
     println!("Rejected({})", name);
     assert_eq!(self.get(name).error, None);
     match self.get(name).status {
-      | Status::Instantiating
+      | Status::Evaluating
       => {
         assert_eq!(self.get(name).async_, Sync::Sync);
         assert!(self.get(name).apm.as_ref().unwrap().is_empty());
-        // XXX possible?
-        panic!()
       },
       | Status::EvaluatingAsync
       => {
@@ -449,6 +445,8 @@ impl Modules {
     
     // Step 12.
     for required in self.get(name).requested.clone() {
+      let cycle = self.get(&required).status == Status::Evaluating;
+
       index = match self.inner_module_evaluation(&required, stack, index) {
         EvalResult::Error(error) => return EvalResult::Error(error),
         EvalResult::Index(index) => index,
@@ -476,13 +474,11 @@ impl Modules {
         None => (),
       };
 
-      match &self.get(&required).status {
-        | Status::EvaluatingAsync
-        => {
+      if !cycle {
+        if self.get(&required).async_ == Sync::Async || self.get(&required).pad.unwrap() > 0 {
           *self.get_mut(name).pad.as_mut().unwrap() += 1;
           self.get_mut(&required).apm.as_mut().unwrap().push(name.to_owned());
-        },
-        | _ => (),
+        }
       }
     }
 
@@ -624,7 +620,6 @@ fn example2() {
   assert_eq!(modules.execution_order, &[
     "B".to_owned(),
     "C".to_owned(),
-    "A".to_owned(),
   ]);
   for m in modules.modules.values() {
     assert_eq!(m.status, if m.name == "C" {
@@ -635,6 +630,25 @@ fn example2() {
   }
 
   modules.tick();
+  assert_eq!(modules.execution_order, &[
+    "B".to_owned(),
+    "C".to_owned(),
+    "A".to_owned(),
+  ]);
+  for m in modules.modules.values() {
+    assert_eq!(m.status, if m.name != "A" {
+      Status::Evaluated
+    } else {
+      Status::EvaluatingAsync
+    });
+  }
+
+  modules.tick();
+  assert_eq!(modules.execution_order, &[
+    "B".to_owned(),
+    "C".to_owned(),
+    "A".to_owned(),
+  ]);
   for m in modules.modules.values() {
     assert_eq!(m.status, Status::Evaluated);
   }
@@ -652,6 +666,12 @@ fn example2b() {
     println!("{:?}", m);
   }
 
+  assert_eq!(modules.execution_order, &[
+    "C".to_owned(),
+    "B".to_owned(),
+  ]);
+
+  modules.tick();
   assert_eq!(modules.execution_order, &[
     "C".to_owned(),
     "B".to_owned(),
@@ -718,6 +738,11 @@ fn example6() {
   run(&mut modules, "A");
   assert_eq!(modules.execution_order, &[
     "B".to_owned(),
+  ]);
+
+  modules.tick();
+  assert_eq!(modules.execution_order, &[
+    "B".to_owned(),
     "A".to_owned(),
   ]);
 }
@@ -745,10 +770,23 @@ fn example7() {
   assert_eq!(modules.execution_order, &[
     "C".to_owned(),
     "B".to_owned(),
-    "A".to_owned(),
   ]);
   for m in modules.modules.values() {
     assert_eq!(m.status, if m.name == "C" {
+      Status::Evaluated
+    } else {
+      Status::EvaluatingAsync
+    });
+  }
+
+  modules.tick();
+  assert_eq!(modules.execution_order, &[
+    "C".to_owned(),
+    "B".to_owned(),
+    "A".to_owned(),
+  ]);
+  for m in modules.modules.values() {
+    assert_eq!(m.status, if m.name != "A" {
       Status::Evaluated
     } else {
       Status::EvaluatingAsync
@@ -776,14 +814,28 @@ fn example_guy() {
   modules.insert("D".to_owned(), Sync::Async, vec!["A".to_owned()], false);
   modules.insert("E".to_owned(), Sync::Async, vec![], false);
   run(&mut modules, "A");
-  for (k, v) in &modules.modules {
-    println!("Module {}: Status={:?} DFSIndex={:?} DFSAncestorIndex={:?} Async={:?}", k, v.status, v.dfs_index, v.dfs_anc_index, v.async_);
+  for m in modules.modules.values() {
+    println!("{:?}", m);
   }
+
+  assert_eq!(modules.execution_order, &[
+    "D".to_owned(),
+    "E".to_owned(),
+  ]);
+
   modules.tick();
   assert_eq!(modules.execution_order, &[
     "D".to_owned(),
-    "B".to_owned(),
     "E".to_owned(),
+    "B".to_owned(),
+    "C".to_owned(),
+  ]);
+
+  modules.tick();
+  assert_eq!(modules.execution_order, &[
+    "D".to_owned(),
+    "E".to_owned(),
+    "B".to_owned(),
     "C".to_owned(),
     "A".to_owned(),
   ]);
