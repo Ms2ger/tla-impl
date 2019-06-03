@@ -328,7 +328,10 @@ impl Modules {
       => {
         self.get_mut(name).set_status(Status::Evaluated);
       },
-      | _ => (),
+      | Status::Evaluated
+      => (),
+      | ref s
+      => panic!("Wrong status for {}: {:?}", name, s),
     }
     for m in self.get(name).apm.clone().unwrap() {
       println!("  > parent module {:?}", self.get(&m));
@@ -365,7 +368,10 @@ impl Modules {
       => {
         self.get_mut(name).set_status(Status::Evaluated);
       },
-      | _ => (),
+      | Status::Evaluated
+      => (),
+      | ref s
+      => panic!("Wrong status for {}: {:?}", name, s),
     }
     self.get_mut(name).error = Some(error.to_owned());
     
@@ -386,6 +392,14 @@ impl Modules {
 
   fn execute_cyclic_module(&mut self, name: &str) {
     println!("Execute cyclic module: {}", name);
+    match &self.get(name).status {
+      | Status::EvaluatingAsync
+      | Status::Evaluating
+      => (),
+      | s
+      => panic!("Wrong status for {}: {:?}", name, s),
+    }
+
     self.execution_order.push(name.to_owned());
     if self.get(name).async_ == Sync::Sync {
       let result = self.get(name).execute_module_sync();
