@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::fmt::Debug;
@@ -179,7 +179,7 @@ impl Module {
 }
 
 struct Modules {
-  modules: HashMap<String, Module>,
+  modules: BTreeMap<String, Module>,
   execution_order: Vec<String>,
   promises: Vec<Rc<Promise>>,
 }
@@ -187,7 +187,7 @@ struct Modules {
 impl Modules {
   fn new() -> Self {
     Modules {
-      modules: HashMap::new(),
+      modules: BTreeMap::new(),
       execution_order: Vec::new(),
       promises: Vec::new(),
     }
