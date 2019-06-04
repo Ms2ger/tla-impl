@@ -565,13 +565,19 @@ impl Modules {
       // Step 9.
       EvalResult::Error(e) => {
         println!("Found error with stack {:?}", stack);
-        for (idx, m) in stack.iter().enumerate() {
+        for m in stack.iter() {
           assert_eq!(self.get(&m).status, Status::Evaluating);
           self.get_mut(&m).set_status(Status::Evaluated);
-          println!("{}", idx);
-          if idx + 1 != stack.len() {
-            self.rejected(&m, &e);
+          match &self.get(&m).error {
+            Some(err) => assert_eq!(err, &e),
+            None => (),
           }
+          self.get_mut(&m).error = Some(e.clone());
+          assert!(self.get(&m).apm.as_ref().unwrap().is_empty(), "{}", m);
+        }
+        let r = promise.data.borrow().is_none();
+        if r {
+          promise.reject(e.clone());
         }
         assert_eq!(self.get(&name).status, Status::Evaluated);
         assert!(self.get(&name).error.is_some());
