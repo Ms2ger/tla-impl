@@ -488,7 +488,7 @@ impl Modules {
         None => (),
       };
 
-      if !cycle {
+      if !cycle && self.get(&required).status != Status::Evaluated {
         if self.get(&required).async_ == Sync::Async || self.get(&required).pad.unwrap() > 0 {
           *self.get_mut(name).pad.as_mut().unwrap() += 1;
           self.get_mut(&required).apm.as_mut().unwrap().push(name.to_owned());
@@ -1025,6 +1025,39 @@ fn spec_example_4_modified() {
   for m in modules.modules.values() {
     assert_eq!(m.status, Status::Evaluated);
     assert_eq!(m.error.is_none(), m.name == "C");
+  }
+}
+
+#[test]
+fn example_cycle() {
+  let mut modules = Modules::new();
+  modules.insert("A".to_owned(), Sync::Sync, vec!["B".to_owned()], false);
+  modules.insert("B".to_owned(), Sync::Async, vec![], false);
+  run(&mut modules, "B");
+  assert_eq!(modules.execution_order, &[
+    "B".to_owned(),
+  ]);
+  assert_eq!(modules.modules["B"].status, Status::EvaluatingAsync);
+  modules.tick();
+
+  assert_eq!(modules.modules["B"].status, Status::Evaluated);
+
+  modules.instantiate("A");
+  modules.evaluate("A");
+
+  assert_eq!(modules.execution_order, &[
+    "B".to_owned(),
+    "A".to_owned(),
+  ]);
+
+  assert_eq!(modules.modules["A"].status, Status::EvaluatingAsync);
+  modules.tick();
+
+  assert_eq!(modules.modules["A"].status, Status::Evaluated);
+
+  for m in modules.modules.values() {
+    assert_eq!(m.status, Status::Evaluated);
+    assert!(m.error.is_none());
   }
 }
 
