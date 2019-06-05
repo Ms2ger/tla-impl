@@ -605,8 +605,6 @@ fn run(modules: &mut Modules, name: &str) -> Rc<Promise> {
   modules.instantiate(name);
   for (k, v) in &mut modules.modules {
     println!("Module {}: DFSIndex={:?} DFSAncestorIndex={:?} Async={:?}", k, v.dfs_index, v.dfs_anc_index, v.async_);
-    v.dfs_index = None;
-    v.dfs_anc_index = None;
   }
 
   println!(">>> Evaluate");
