@@ -614,6 +614,25 @@ fn run(modules: &mut Modules, name: &str) -> Rc<Promise> {
   promise
 }
 
+fn check(modules: &mut Modules, expected: &[(&[&str], &[&str])]) {
+  let mut all_started: Vec<&str> = vec![];
+  let mut all_finished: Vec<&str> = vec![];
+  for (started, finished) in expected {
+    all_started.extend(*started);
+    all_finished.extend(*finished);
+    assert_eq!(modules.execution_order, all_started);
+    for m in modules.modules.values() {
+      assert_eq!(m.status, if all_finished.contains(&&*m.name) {
+        Status::Evaluated
+      } else {
+        Status::EvaluatingAsync
+      });
+      assert!(m.error.is_none());
+    }
+    modules.tick();
+  }
+}
+
 #[test]
 fn example1() {
   println!("Example 1");
@@ -1183,7 +1202,11 @@ fn example_common_dep_cycle_2c() {
     "D".to_owned(),
   ]);
   for m in modules.modules.values() {
-    assert_eq!(m.status, Status::EvaluatingAsync);
+    assert_eq!(m.status, if m.name == "F" {
+      Status::Evaluated
+    } else {
+      Status::EvaluatingAsync
+    });
     assert!(m.error.is_none());
   }
 
@@ -1227,6 +1250,111 @@ fn example_common_dep_cycle_2c() {
     "B".to_owned(),
     "C".to_owned(),
     "A".to_owned(),
+  ]);
+  for m in modules.modules.values() {
+    assert_eq!(m.status, Status::Evaluated);
+    assert!(m.error.is_none());
+  }
+}
+
+#[test]
+fn example_common_dep_cycle_2d() {
+  let mut modules = Modules::new();
+  modules.insert("E".to_owned(), Sync::Async, vec!["A".to_owned()], false);
+  modules.insert("A".to_owned(), Sync::Async, vec!["B".to_owned(), "C".to_owned()], false);
+  modules.insert("B".to_owned(), Sync::Async, vec!["D".to_owned()], false);
+  modules.insert("C".to_owned(), Sync::Async, vec!["D".to_owned()], false);
+  modules.insert("D".to_owned(), Sync::Async, vec!["A".to_owned(), "F".to_owned()], false);
+  modules.insert("F".to_owned(), Sync::Async, vec![], false);
+  run(&mut modules, "F");
+  assert_eq!(modules.execution_order, &[
+    "F".to_owned(),
+  ]);
+  assert_eq!(modules.modules["F"].status, Status::EvaluatingAsync);
+
+  run(&mut modules, "E");
+
+  assert_eq!(modules.execution_order, &[
+    "F".to_owned(),
+  ]);
+  for m in modules.modules.values() {
+    assert_eq!(m.status, Status::EvaluatingAsync);
+    assert!(m.error.is_none());
+  }
+
+  modules.tick();
+  assert_eq!(modules.execution_order, &[
+    "F".to_owned(),
+    "D".to_owned(),
+  ]);
+  for m in modules.modules.values() {
+    assert_eq!(m.status, if m.name == "F" {
+      Status::Evaluated
+    } else {
+      Status::EvaluatingAsync
+    });
+    assert!(m.error.is_none());
+  }
+
+  modules.tick();
+  assert_eq!(modules.execution_order, &[
+    "F".to_owned(),
+    "D".to_owned(),
+    "B".to_owned(),
+    "C".to_owned(),
+  ]);
+  for m in modules.modules.values() {
+    assert_eq!(m.status, if m.name == "F" || m.name == "D" {
+      Status::Evaluated
+    } else {
+      Status::EvaluatingAsync
+    });
+    assert!(m.error.is_none());
+  }
+
+  modules.tick();
+  assert_eq!(modules.execution_order, &[
+    "F".to_owned(),
+    "D".to_owned(),
+    "B".to_owned(),
+    "C".to_owned(),
+    "A".to_owned(),
+  ]);
+  for m in modules.modules.values() {
+    assert_eq!(m.status, if m.name != "A" && m.name != "E" {
+      Status::Evaluated
+    } else {
+      Status::EvaluatingAsync
+    });
+    assert!(m.error.is_none());
+  }
+
+  modules.tick();
+  assert_eq!(modules.execution_order, &[
+    "F".to_owned(),
+    "D".to_owned(),
+    "B".to_owned(),
+    "C".to_owned(),
+    "A".to_owned(),
+    "E".to_owned(),
+  ]);
+  for m in modules.modules.values() {
+    assert_eq!(m.status, if m.name != "E" {
+      Status::Evaluated
+    } else {
+      Status::EvaluatingAsync
+    });
+    assert!(m.error.is_none());
+  }
+
+  modules.tick();
+  assert_eq!(modules.execution_order, &[
+    "F".to_owned(),
+    "D".to_owned(),
+    "B".to_owned(),
+    "C".to_owned(),
+    "A".to_owned(),
+    "E".to_owned(),
   ]);
   for m in modules.modules.values() {
     assert_eq!(m.status, Status::Evaluated);
@@ -1456,6 +1584,29 @@ fn example_cycle() {
     assert_eq!(m.status, Status::Evaluated);
     assert!(m.error.is_none());
   }
+}
+
+#[test]
+fn example_super_cycle() {
+  let mut modules = Modules::new();
+  modules.insert("A".to_owned(), Sync::Async, vec!["B".to_owned()], false);
+  modules.insert("B".to_owned(), Sync::Async, vec!["C".to_owned()], false);
+  modules.insert("C".to_owned(), Sync::Async, vec!["D".to_owned(), "E".to_owned()], false);
+  modules.insert("D".to_owned(), Sync::Async, vec!["F".to_owned()], false);
+  modules.insert("E".to_owned(), Sync::Async, vec!["A".to_owned()], false);
+  modules.insert("F".to_owned(), Sync::Async, vec!["B".to_owned()], false);
+  run(&mut modules, "A");
+
+  let expected: &[(&[&str], &[&str])] = &[
+    (&["F", "E"], &[]),
+    (&["D"], &["F", "E"]),
+    (&["C"], &["D"]),
+    (&["B"], &["C"]),
+    (&["A"], &["B"]),
+    (&[], &["A"]),
+  ];
+  assert_eq!(modules.cycle_root("F"), "A");
+  check(&mut modules, expected);
 }
 
 #[test]
