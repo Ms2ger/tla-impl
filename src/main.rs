@@ -221,9 +221,8 @@ impl Modules {
     while self.get(&module).dfs_index.unwrap() > self.get(&module).dfs_anc_index.unwrap() {
       assert!(!self.get(&module).apm.as_ref().unwrap().is_empty(), "APM for {} is empty", module);
       let next = self.get(&module).apm.as_ref().unwrap()[0].to_owned();
-      assert_eq!(self.get(&next).dfs_anc_index, self.get(&module).dfs_anc_index);
+      println!("    >> {}", next);
       module = next;
-      println!("    >> {}", module);
     }
     assert_eq!(self.get(&module).dfs_index, self.get(&module).dfs_anc_index);
     println!("    result={}", module);
@@ -335,9 +334,6 @@ impl Modules {
     }
     for m in self.get(name).apm.clone().unwrap() {
       println!("  > parent module {:?}", self.get(&m));
-      if self.get(name).dfs_index.unwrap() != self.get(name).dfs_anc_index.unwrap() {
-        assert_eq!(self.get(&m).dfs_anc_index.unwrap(), self.get(name).dfs_anc_index.unwrap());
-      }
       assert!(self.get(&m).pad.unwrap() > 0);
       *self.get_mut(&m).pad.as_mut().unwrap() -= 1;
       if self.get(&m).pad.unwrap() == 0 && self.get(&m).error.is_none() {
