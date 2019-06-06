@@ -464,10 +464,13 @@ impl Modules {
         EvalResult::Index(index) => index,
       };
 
+      let mut cycle = false;
       let required = match &self.get(&required).status {
         | Status::Evaluating
         => {
           assert!(stack.contains(&required));
+          cycle = self.get(&required).dfs_anc_index.unwrap() < self.get(name).dfs_anc_index.unwrap() &&
+                  self.get(&required).dfs_index == self.get(&required).dfs_anc_index;
           let dfs_anc_index = self.get(name).dfs_anc_index.unwrap().min(self.get(&required).dfs_anc_index.unwrap());
           self.get_mut(name).set_anc_index(dfs_anc_index);
           required
@@ -489,10 +492,8 @@ impl Modules {
       println!("Considering registering async dependency {} -> {}", name, required);
       println!("    module = {:?}", self.get(&name));
       println!("    required = {:?}", self.get(&required));
-      println!("    > {}", self.get(&required).dfs_anc_index == self.get(&name).dfs_anc_index);
-      println!("    > {}", self.get(&required).dfs_index == self.get(&required).dfs_anc_index);
-      if !(self.get(&required).dfs_anc_index == self.get(&name).dfs_anc_index &&
-           self.get(&required).dfs_index == self.get(&required).dfs_anc_index) {
+      println!("    cycle = {:?}", cycle);
+      if !cycle && self.get(&required).status != Status::Evaluated {
         if self.get(&required).async_ == Sync::Async || self.get(&required).pad.unwrap() > 0 {
           *self.get_mut(name).pad.as_mut().unwrap() += 1;
           self.get_mut(&required).apm.as_mut().unwrap().push(name.to_owned());
