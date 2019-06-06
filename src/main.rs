@@ -342,7 +342,7 @@ impl Modules {
         if self.get(&root).error.is_some() {
           return;
         }
-        self.execute_cyclic_module(&m); // XXX?
+        self.execute_cyclic_module(&m);
       }
     }
     if let Some(promise) = self.get(name).promise.clone() {
@@ -516,7 +516,6 @@ impl Modules {
       let mut done = false;
       while !done {
         let required = stack.pop().unwrap();
-        // XXX name?
         let status = if self.get(name).async_ == Sync::Async || self.get(name).pad.unwrap() > 0 {
           Status::EvaluatingAsync
         } else {
@@ -587,7 +586,7 @@ impl Modules {
       // Step 10.
       EvalResult::Index(_) => {
         assert!(self.get(&name).status == Status::Evaluated || self.get(&name).status == Status::EvaluatingAsync);
-        assert!(self.get(&name).error.is_none()); // XXX
+        assert!(self.get(&name).error.is_none());
         assert!(stack.is_empty());
       },
     }
