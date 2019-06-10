@@ -347,7 +347,16 @@ impl Modules {
         if self.get(&root).error.is_some() {
           return;
         }
-        self.execute_cyclic_module(&m);
+        if self.get(&m).async_ == Sync::Async {
+          self.execute_cyclic_module(&m);
+        } else {
+          self.execution_order.push(m.to_owned());
+          let result = self.get(&m).execute_module_sync();
+          match result {
+            Ok(()) => self.fulfilled(&m),
+            Err(e) => self.rejected(&m, &e),
+          }
+        }
       }
     }
     if let Some(promise) = self.get(name).promise.clone() {
@@ -400,10 +409,13 @@ impl Modules {
     println!("Execute cyclic module: {}", name);
     match &self.get(name).status {
       | Status::Evaluating
+      | Status::Evaluated
       => (),
       | s
       => panic!("Wrong status for {}: {:?}", name, s),
     }
+
+    self.get_mut(name).async_evaluating = true;
 
     self.execution_order.push(name.to_owned());
     if self.get(name).async_ == Sync::Sync {
@@ -499,12 +511,14 @@ impl Modules {
       }
     }
 
-    // Step 14.
+    // Step 14
+    println!("{}.PAD = {}", name, self.get(&name).pad.unwrap());
     if self.get(&name).pad.unwrap() > 0 {
       self.get_mut(&name).async_evaluating = true;
     } else if self.get(&name).async_ == Sync::Async {
       self.execute_cyclic_module(name);
     } else {
+      self.execution_order.push(name.to_owned());
       let result = self.get(name).execute_module_sync();
       match result {
         Ok(()) => (),
@@ -624,11 +638,8 @@ fn check(modules: &mut Modules, expected: &[(&[&str], &[&str])]) {
     all_finished.extend(*finished);
     assert_eq!(modules.execution_order, all_started);
     for m in modules.modules.values() {
-      assert_eq!(m.status, if all_finished.contains(&&*m.name) {
-        Status::Evaluated
-      } else {
-        Status::EvaluatingAsync
-      });
+      assert_eq!(m.async_evaluating, !all_finished.contains(&&*m.name));
+      assert_eq!(m.status, Status::Evaluated);
       assert!(m.error.is_none());
     }
     modules.tick();
@@ -786,7 +797,7 @@ fn example_single_broken_async() {
     "A".to_owned(),
   ]);
   for m in modules.modules.values() {
-    assert_eq!(m.status, Status::EvaluatingAsync);
+    assert_eq!(m.status, Status::Evaluated);
     assert!(m.error.is_none());
   }
 
@@ -882,12 +893,15 @@ fn example_common_dep_cycle_2b() {
   modules.insert("D".to_owned(), Sync::Async, vec!["A".to_owned(), "F".to_owned()], false);
   modules.insert("F".to_owned(), Sync::Async, vec![], false);
   run(&mut modules, "F");
+
   assert_eq!(modules.execution_order, &[
     "F".to_owned(),
   ]);
-  assert_eq!(modules.modules["F"].status, Status::EvaluatingAsync);
+  assert_eq!(modules.modules["F"].status, Status::Evaluated);
+  assert!(modules.modules["F"].async_evaluating);
   modules.tick();
   assert_eq!(modules.modules["F"].status, Status::Evaluated);
+  assert!(!modules.modules["F"].async_evaluating);
 
   run(&mut modules, "A");
 
@@ -912,7 +926,8 @@ fn example_common_dep_cycle_2c() {
   assert_eq!(modules.execution_order, &[
     "F".to_owned(),
   ]);
-  assert_eq!(modules.modules["F"].status, Status::EvaluatingAsync);
+  assert_eq!(modules.modules["F"].status, Status::Evaluated);
+  assert!(modules.modules["F"].async_evaluating);
 
   run(&mut modules, "A");
 
@@ -939,7 +954,8 @@ fn example_common_dep_cycle_2d() {
   assert_eq!(modules.execution_order, &[
     "F".to_owned(),
   ]);
-  assert_eq!(modules.modules["F"].status, Status::EvaluatingAsync);
+  assert_eq!(modules.modules["F"].status, Status::Evaluated);
+  assert!(modules.modules["F"].async_evaluating);
 
   run(&mut modules, "E");
 
@@ -1006,6 +1022,7 @@ fn spec_example_2() {
   ]);
   for m in modules.modules.values() {
     assert_eq!(m.status, Status::Evaluated);
+    assert!(!m.async_evaluating);
     assert_eq!(m.error.is_none(), m.name == "C");
   }
 }
@@ -1040,6 +1057,7 @@ fn spec_example_4() {
   ]);
   for m in modules.modules.values() {
     assert_eq!(m.status, Status::Evaluated);
+    assert!(!m.async_evaluating);
     assert_eq!(m.error.is_none(), m.name == "C");
   }
 }
@@ -1057,6 +1075,7 @@ fn spec_example_4_modified() {
   ]);
   for m in modules.modules.values() {
     assert_eq!(m.status, Status::Evaluated);
+    assert!(!m.async_evaluating);
     assert_eq!(m.error.is_none(), m.name == "C");
   }
 }
@@ -1070,7 +1089,7 @@ fn example_cycle() {
   assert_eq!(modules.execution_order, &[
     "B".to_owned(),
   ]);
-  assert_eq!(modules.modules["B"].status, Status::EvaluatingAsync);
+  assert_eq!(modules.modules["B"].status, Status::Evaluated);
   modules.tick();
 
   assert_eq!(modules.modules["B"].status, Status::Evaluated);
@@ -1117,14 +1136,18 @@ fn two_step() {
   assert_eq!(modules.execution_order, &[
     "B".to_owned(),
   ]);
-  assert_eq!(modules.modules["B"].status, Status::EvaluatingAsync);
+  assert_eq!(modules.modules["B"].status, Status::Evaluated);
+  assert!(modules.modules["B"].async_evaluating);
   modules.tick();
   assert_eq!(modules.modules["B"].status, Status::Evaluated);
+  assert!(!modules.modules["B"].async_evaluating);
 
   run(&mut modules, "A");
-  assert_eq!(modules.modules["A"].status, Status::EvaluatingAsync);
+  assert_eq!(modules.modules["A"].status, Status::Evaluated);
+  assert!(modules.modules["A"].async_evaluating);
   modules.tick();
   assert_eq!(modules.modules["A"].status, Status::Evaluated);
+  assert!(!modules.modules["A"].async_evaluating);
 }
 
 #[test]
