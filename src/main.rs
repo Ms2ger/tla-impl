@@ -102,7 +102,6 @@ enum Status {
   Instantiating,
   Instantiated,
   Evaluating,
-  EvaluatingAsync,
   Evaluated,
 }
 
@@ -117,6 +116,7 @@ struct Module {
   dfs_anc_index: Option<usize>,
   requested: Vec<String>,
   async_: Sync,
+  async_evaluating: bool,
   apm: Option<LoudVec<String>>,
   pad: Option<usize>,
 
@@ -142,6 +142,7 @@ impl Module {
       dfs_anc_index: None,
       requested,
       async_,
+      async_evaluating: false,
       apm: None,
       pad: None,
 
@@ -217,6 +218,7 @@ impl Modules {
 
   fn cycle_root(&self, module: &str) -> String {
     println!("Fetching cycle root of {}", module);
+    assert_eq!(self.get(module).status, Status::Evaluated);
     let mut module = module.to_owned();
     while self.get(&module).dfs_index.unwrap() > self.get(&module).dfs_anc_index.unwrap() {
       assert!(!self.get(&module).apm.as_ref().unwrap().is_empty(), "APM for {} is empty", module);
@@ -234,7 +236,6 @@ impl Modules {
       // Step 2.
       | s @ Status::Instantiating
       | s @ Status::Instantiated
-      | s @ Status::EvaluatingAsync
       | s @ Status::Evaluated
       => {
         println!("inner_module_instantiation: short circuit for {} with {:?}", name, s);
@@ -267,7 +268,6 @@ impl Modules {
           self.get_mut(name).set_anc_index(dfs_anc_index);
         },
         | Status::Instantiated
-        | Status::EvaluatingAsync
         | Status::Evaluated
         => {
           assert!(!stack.contains(&required));
@@ -305,7 +305,6 @@ impl Modules {
     self.inner_module_instantiation(name, &mut stack, 0);
     match self.get(name).status {
       | Status::Instantiated
-      | Status::EvaluatingAsync
       | Status::Evaluated
       => (),
       | ref s
@@ -316,28 +315,34 @@ impl Modules {
 
   fn fulfilled(&mut self, name: &str) {
     println!("Fulfilled({})", name);
-    assert!(self.get(name).error.is_none());
+    // Step 1.
     match self.get(name).status {
-      | Status::Evaluating
-      => {
-        assert_eq!(self.get(name).async_, Sync::Sync);
-        assert!(self.get(name).apm.as_ref().unwrap().is_empty());
-      },
-      | Status::EvaluatingAsync
-      => {
-        self.get_mut(name).set_status(Status::Evaluated);
-      },
       | Status::Evaluated
       => (),
       | ref s
       => panic!("Wrong status for {}: {:?}", name, s),
     }
+
+    // Step 2.
+    if !self.get(name).async_evaluating {
+      // XXX why?
+      assert!(self.get(name).error.is_some());
+      return;
+    }
+
+    // Step 3.
+    assert!(self.get(name).error.is_none());
+
+    // Step 4.
+    self.get_mut(name).async_evaluating = false;
+
+    // Step 5.
     for m in self.get(name).apm.clone().unwrap() {
       println!("  > parent module {:?}", self.get(&m));
       assert!(self.get(&m).pad.unwrap() > 0);
       *self.get_mut(&m).pad.as_mut().unwrap() -= 1;
       if self.get(&m).pad.unwrap() == 0 && self.get(&m).error.is_none() {
-        assert_eq!(self.get(&m).status, Status::EvaluatingAsync);
+        assert!(self.get(&m).async_evaluating);
         let root = self.cycle_root(&m);
         if self.get(&root).error.is_some() {
           return;
@@ -353,31 +358,36 @@ impl Modules {
 
   fn rejected(&mut self, name: &str, error: &str) {
     println!("Rejected({})", name);
-    assert_eq!(self.get(name).error, None);
+    // Step 1.
     match self.get(name).status {
-      | Status::Evaluating
-      => {
-        assert_eq!(self.get(name).async_, Sync::Sync);
-        assert!(self.get(name).apm.as_ref().unwrap().is_empty());
-      },
-      | Status::EvaluatingAsync
-      => {
-        self.get_mut(name).set_status(Status::Evaluated);
-      },
       | Status::Evaluated
       => (),
       | ref s
       => panic!("Wrong status for {}: {:?}", name, s),
     }
+
+    // Step 2.
+    if !self.get(name).async_evaluating {
+      // XXX why?
+      assert!(self.get(name).error.is_some());
+      return;
+    }
+
+    // Step 3.
+    assert_eq!(self.get(name).error, None);
+
+    // Step 4.
     self.get_mut(name).error = Some(error.to_owned());
-    
+
+    // Step 5.
+    self.get_mut(name).async_evaluating = false;
+
+    // Step 6.
     for m in self.get(name).apm.clone().unwrap() {
       if self.get(name).dfs_index.unwrap() != self.get(name).dfs_anc_index.unwrap() {
         assert_eq!(self.get(&m).dfs_anc_index.unwrap(), self.get(name).dfs_anc_index.unwrap());
       }
-      if self.get(&m).status == Status::EvaluatingAsync {
-        self.rejected(&m, error);
-      }
+      self.rejected(&m, error);
     }
 
     if let Some(promise) = self.get(name).promise.clone() {
@@ -389,7 +399,6 @@ impl Modules {
   fn execute_cyclic_module(&mut self, name: &str) {
     println!("Execute cyclic module: {}", name);
     match &self.get(name).status {
-      | Status::EvaluatingAsync
       | Status::Evaluating
       => (),
       | s
@@ -420,7 +429,6 @@ impl Modules {
     match &self.get(name).status {
       // Step 2.
       | Status::Evaluated
-      | Status::EvaluatingAsync
       => {
         return match &self.get(name).error {
           Some(error) => EvalResult::Error(error.clone()),
@@ -460,50 +468,48 @@ impl Modules {
         EvalResult::Index(index) => index,
       };
 
-      let mut cycle = false;
       let required = match &self.get(&required).status {
         | Status::Evaluating
         => {
           assert!(stack.contains(&required));
-          cycle = self.get(&required).dfs_anc_index.unwrap() < self.get(name).dfs_anc_index.unwrap() &&
-                  self.get(&required).dfs_index == self.get(&required).dfs_anc_index;
           let dfs_anc_index = self.get(name).dfs_anc_index.unwrap().min(self.get(&required).dfs_anc_index.unwrap());
           self.get_mut(name).set_anc_index(dfs_anc_index);
           required
         },
-        | Status::EvaluatingAsync
         | Status::Evaluated
         => {
           assert!(!stack.contains(&required));
-          self.cycle_root(&required)
+          let root = self.cycle_root(&required);
+          assert_eq!(self.get(&root).status, Status::Evaluated);
+          if let Some(error) = &self.get(&required).error {
+            return EvalResult::Error(error.clone());
+          }
+         root
         },
         | s
         => panic!("Wrong status for {}: {:?}", required, s),
-      };
-      match &self.get(&required).error {
-        Some(error) => return EvalResult::Error(error.clone()),
-        None => (),
       };
 
       println!("Considering registering async dependency {} -> {}", name, required);
       println!("    module = {:?}", self.get(&name));
       println!("    required = {:?}", self.get(&required));
-      println!("    cycle = {:?}", cycle);
-      if !cycle && self.get(&required).status != Status::Evaluated {
-        if self.get(&required).async_ == Sync::Async || self.get(&required).pad.unwrap() > 0 {
-          *self.get_mut(name).pad.as_mut().unwrap() += 1;
-          self.get_mut(&required).apm.as_mut().unwrap().push(name.to_owned());
-        }
+      if self.get(&required).async_evaluating {
+        *self.get_mut(name).pad.as_mut().unwrap() += 1;
+        self.get_mut(&required).apm.as_mut().unwrap().push(name.to_owned());
       }
     }
 
     // Step 14.
-    if self.get(&name).pad.unwrap() == 0 {
+    if self.get(&name).pad.unwrap() > 0 {
+      self.get_mut(&name).async_evaluating = true;
+    } else if self.get(&name).async_ == Sync::Async {
       self.execute_cyclic_module(name);
-      match &self.get(name).error {
-        Some(error) => return EvalResult::Error(error.clone()),
-        None => (),
-      };
+    } else {
+      let result = self.get(name).execute_module_sync();
+      match result {
+        Ok(()) => (),
+        Err(e) => return EvalResult::Error(e),
+      }
     }
 
     // Step 15.
@@ -516,12 +522,7 @@ impl Modules {
       let mut done = false;
       while !done {
         let required = stack.pop().unwrap();
-        let status = if self.get(name).async_ == Sync::Async || self.get(name).pad.unwrap() > 0 {
-          Status::EvaluatingAsync
-        } else {
-          Status::Evaluated
-        };
-        self.get_mut(&required).set_status(status);
+        self.get_mut(&required).set_status(Status::Evaluated);
         done = required == name;
       }
     }
@@ -535,7 +536,6 @@ impl Modules {
       | Status::Instantiated
       => name.to_owned(),
       // Step 3.
-      | Status::EvaluatingAsync
       | Status::Evaluated
       => self.cycle_root(name),
       // Step 2.
@@ -573,7 +573,6 @@ impl Modules {
             None => (),
           }
           self.get_mut(&m).error = Some(e.clone());
-          assert!(self.get(&m).apm.as_ref().unwrap().is_empty(), "{}", m);
         }
         let r = promise.data.borrow().is_none();
         if r {
@@ -585,9 +584,12 @@ impl Modules {
       },
       // Step 10.
       EvalResult::Index(_) => {
-        assert!(self.get(&name).status == Status::Evaluated || self.get(&name).status == Status::EvaluatingAsync);
+        assert!(self.get(&name).status == Status::Evaluated);
         assert!(self.get(&name).error.is_none());
         assert!(stack.is_empty());
+        if !self.get(&name).async_evaluating {
+          promise.resolve();
+        }
       },
     }
 
@@ -613,6 +615,7 @@ fn run(modules: &mut Modules, name: &str) -> Rc<Promise> {
   promise
 }
 
+#[cfg(test)]
 fn check(modules: &mut Modules, expected: &[(&[&str], &[&str])]) {
   let mut all_started: Vec<&str> = vec![];
   let mut all_finished: Vec<&str> = vec![];
@@ -1122,6 +1125,21 @@ fn two_step() {
   assert_eq!(modules.modules["A"].status, Status::EvaluatingAsync);
   modules.tick();
   assert_eq!(modules.modules["A"].status, Status::Evaluated);
+}
+
+#[test]
+fn cycle_error_persistence() {
+  let mut modules = Modules::new();
+  modules.insert("A".to_owned(), Sync::Sync, vec!["B".to_owned(), "C".to_owned()], false);
+  modules.insert("B".to_owned(), Sync::Async, vec!["A".to_owned()], true);
+  modules.insert("C".to_owned(), Sync::Sync, vec![], true);
+  run(&mut modules, "A");
+  let error = modules.modules["C"].error.clone();
+  assert!(error.is_some());
+  for m in modules.modules.values() {
+    assert_eq!(m.status, Status::Evaluated);
+    assert_eq!(m.error, error);
+  }
 }
 
 fn main() {
