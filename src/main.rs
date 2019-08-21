@@ -220,6 +220,10 @@ impl Modules {
     println!("Fetching cycle root of {}", module);
     assert_eq!(self.get(module).status, Status::Evaluated);
     let mut module = module.to_owned();
+    if self.get(&module).apm.as_ref().unwrap().is_empty() {
+      return module;
+    }
+
     while self.get(&module).dfs_index.unwrap() > self.get(&module).dfs_anc_index.unwrap() {
       assert!(!self.get(&module).apm.as_ref().unwrap().is_empty(), "APM for {} is empty", module);
       let next = self.get(&module).apm.as_ref().unwrap()[0].to_owned();
@@ -1163,6 +1167,20 @@ fn cycle_error_persistence() {
     assert_eq!(m.status, Status::Evaluated);
     assert_eq!(m.error, error);
   }
+}
+
+#[test]
+fn synchronous_cycles_121() {
+  let mut modules = Modules::new();
+  modules.insert("Top".to_owned(), Sync::Sync, vec!["A".to_owned(), "B".to_owned()], false);
+  modules.insert("A".to_owned(), Sync::Sync, vec!["B".to_owned()], false);
+  modules.insert("B".to_owned(), Sync::Sync, vec!["A".to_owned()], false);
+  run(&mut modules, "Top");
+
+  let expected: &[(&[&str], &[&str])] = &[
+    (&["B", "A", "Top"], &["B", "A", "Top"]),
+  ];
+  check(&mut modules, expected);
 }
 
 fn main() {
