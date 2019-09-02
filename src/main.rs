@@ -45,7 +45,7 @@ impl<T> IntoIterator for LoudVec<T> {
 
 struct Promise {
   data: RefCell<Option<Result<(), String>>>,
-  children: RefCell<Vec<(Box<FnOnce(&mut Modules)>, Box<FnOnce(&mut Modules, String)>)>>,
+  children: RefCell<Vec<(Box<dyn FnOnce(&mut Modules)>, Box<dyn FnOnce(&mut Modules, String)>)>>,
 }
 
 impl Promise {
@@ -67,7 +67,7 @@ impl Promise {
     assert_eq!(*cell, None);
     *cell = Some(Err(error));
   }
-  fn then(&self, resolve: Box<FnOnce(&mut Modules)>, reject: Box<FnOnce(&mut Modules, String)>) {
+  fn then(&self, resolve: Box<dyn FnOnce(&mut Modules)>, reject: Box<dyn FnOnce(&mut Modules, String)>) {
     let mut children = self.children.borrow_mut();
     children.push((resolve, reject));
   }
