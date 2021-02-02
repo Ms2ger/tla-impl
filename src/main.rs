@@ -98,9 +98,9 @@ enum Sync {
 
 #[derive(PartialOrd, Ord, PartialEq, Eq, Debug)]
 enum Status {
-  Uninstantiated,
-  Instantiating,
-  Instantiated,
+  Unlinked,
+  Linking,
+  Linked,
   Evaluating,
   Evaluated,
 }
@@ -136,7 +136,7 @@ impl Module {
       name,
       broken,
 
-      status: Status::Uninstantiated,
+      status: Status::Unlinked,
       error: None,
       dfs_index: None,
       dfs_anc_index: None,
@@ -236,24 +236,24 @@ impl Modules {
     module
   }
 
-  fn inner_module_instantiation(&mut self, name: &str, stack: &mut LoudVec<String>, index: usize) -> usize {
+  fn inner_module_linking(&mut self, name: &str, stack: &mut LoudVec<String>, index: usize) -> usize {
     match &self.get(name).status {
       // Step 2.
-      | s @ Status::Instantiating
-      | s @ Status::Instantiated
+      | s @ Status::Linking
+      | s @ Status::Linked
       | s @ Status::Evaluated
       => {
-        println!("inner_module_instantiation: short circuit for {} with {:?}", name, s);
+        println!("inner_module_linking: short circuit for {} with {:?}", name, s);
         return index;
       },
       // Step 3.
-      | Status::Uninstantiated
+      | Status::Unlinked
       => (),
       | s
       => panic!("Wrong status for {}: {:?}", name, s),
     };
     // Step 4.
-    self.get_mut(name).set_status(Status::Instantiating);
+    self.get_mut(name).set_status(Status::Linking);
     // Step 5.
     self.get_mut(name).dfs_index = Some(index);
     // Step 6.
@@ -264,15 +264,15 @@ impl Modules {
     stack.push(name.to_owned());
     // Step 9.
     for required in self.get(name).requested.clone() {
-      index = self.inner_module_instantiation(&required, stack, index);
+      index = self.inner_module_linking(&required, stack, index);
       match &self.get(&required).status {
-        | Status::Instantiating
+        | Status::Linking
         => {
           assert!(stack.contains(&required));
           let dfs_anc_index = self.get(name).dfs_anc_index.unwrap().min(self.get(&required).dfs_anc_index.unwrap());
           self.get_mut(name).set_anc_index(dfs_anc_index);
         },
-        | Status::Instantiated
+        | Status::Linked
         | Status::Evaluated
         => {
           assert!(!stack.contains(&required));
@@ -296,7 +296,7 @@ impl Modules {
       let mut done = false;
       while !done {
         let required = stack.pop().unwrap();
-        self.get_mut(&required).set_status(Status::Instantiated);
+        self.get_mut(&required).set_status(Status::Linked);
         done = required == name;
       }
     }
@@ -304,12 +304,12 @@ impl Modules {
     index
   }
 
-  fn instantiate(&mut self, name: &str) {
-    assert!(self.get(name).status != Status::Instantiating && self.get(name).status != Status::Evaluating);
-    let mut stack = LoudVec::new("Instantiate stack");
-    self.inner_module_instantiation(name, &mut stack, 0);
+  fn link(&mut self, name: &str) {
+    assert!(self.get(name).status != Status::Linking && self.get(name).status != Status::Evaluating);
+    let mut stack = LoudVec::new("Link stack");
+    self.inner_module_linking(name, &mut stack, 0);
     match self.get(name).status {
-      | Status::Instantiated
+      | Status::Linked
       | Status::Evaluated
       => (),
       | ref s
@@ -459,7 +459,7 @@ impl Modules {
       | Status::Evaluating
       => return EvalResult::Index(index),
       // Step 4.
-      | Status::Instantiated
+      | Status::Linked
       => (),
       | s
       => panic!("Wrong status for {}: {:?}", name, s),
@@ -555,7 +555,7 @@ impl Modules {
 
   fn evaluate(&mut self, name: &str) -> Rc<Promise> {
     let name = match &self.get(name).status {
-      | Status::Instantiated
+      | Status::Linked
       => name.to_owned(),
       // Step 3.
       | Status::Evaluated
@@ -621,8 +621,8 @@ impl Modules {
 }
 
 fn run(modules: &mut Modules, name: &str) -> Rc<Promise> {
-  println!(">>> Instantiate");
-  modules.instantiate(name);
+  println!(">>> Link");
+  modules.link(name);
   for (k, v) in &mut modules.modules {
     println!("Module {}: DFSIndex={:?} DFSAncestorIndex={:?} Async={:?}", k, v.dfs_index, v.dfs_anc_index, v.async_);
   }
@@ -1102,7 +1102,7 @@ fn example_cycle() {
 
   assert_eq!(modules.modules["B"].status, Status::Evaluated);
 
-  modules.instantiate("A");
+  modules.link("A");
   modules.evaluate("A");
 
   let expected: &[(&[&str], &[&str])] = &[
